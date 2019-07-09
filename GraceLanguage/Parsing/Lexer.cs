@@ -444,7 +444,7 @@ namespace Grace.Parsing
             return new CommentToken(moduleName, line, column, body);
         }
 
-        private static bool isOperatorCharacter(char c, UnicodeCategory cat)
+        public static bool isOperatorCharacter(char c, UnicodeCategory cat)
         {
             return c != '"' && c != ',' && c != ';'
                 &&
@@ -614,11 +614,13 @@ namespace Grace.Parsing
                 {
                     char c = code[index];
                     if (c == 'n')
-                        b.Append('\u2028');
+                        b.Append('\n');
                     else if (c == 't')
                         b.Append('\t');
                     else if (c == 'l')
                         b.Append('\u2028');
+                    else if (c == 'e')
+                        b.Append('\x1b');
                     else if (c == '{')
                         b.Append('{');
                     else if (c == '}')
