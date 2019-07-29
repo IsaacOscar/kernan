@@ -155,12 +155,37 @@ namespace Grace
                     }
                     if (mode == "pretty-print")
                     {
-                        Console.Write(
-                                ParseNodeMeta.PrettyPrintModule(
-                                    interp,
-                                    (ObjectParseNode)module,
-                                    prettyOption == "semicolons"));
-                        return 0;
+                        if (prettyOption == "semicolons" || prettyOption == "")
+                        {
+                            Console.Write(
+                                    ParseNodeMeta.PrettyPrintModule(
+                                        interp,
+                                        (ObjectParseNode)module,
+                                        prettyOption == "semicolons"));
+                            return 0;
+                        }
+                        else if (prettyOption.StartsWith("partial(") && prettyOption.EndsWith(")"))
+                        {
+                            string[] types = prettyOption.Substring(8, prettyOption.Length - 9).Split(new Char [] {','});
+                            if (types.Length == 3)
+                            {
+                                Console.Write(
+                                    ParseNodeMeta.PrettyPrintPartiallyTyped(
+                                        interp,
+                                        (ObjectParseNode)module,
+                                        Int32.Parse(types[0]), Int32.Parse(types[1]), Int32.Parse(types[2])));
+                                return 0;
+                            }
+                        }
+                        else if (prettyOption.StartsWith("random(") && prettyOption.EndsWith(")"))
+                        {
+                            Console.Write(
+                                    ParseNodeMeta.PrettyPrintRandomlyTyped(
+                                        interp,
+                                        (ObjectParseNode)module,
+                                        Int32.Parse(prettyOption.Substring(8, prettyOption.Length - 9))));
+                            return 0;
+                        }
                     }
                     //Console.WriteLine("========== TRANSLATING ==========");
                     ExecutionTreeTranslator ett = new ExecutionTreeTranslator();

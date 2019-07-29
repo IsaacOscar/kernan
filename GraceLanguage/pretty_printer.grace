@@ -42,12 +42,87 @@ def pnVarArgsParameter = parseNodes.VarArgsParameter
 def pnPrefixOperator = parseNodes.PrefixOperator
 def pnAnnotations = parseNodes.Annotations
 def pnExplicitBracketRequest = parseNodes.ExplicitBracketRequest
+def pnImplicitBracketRequest = parseNodes.ImplicitBracketRequest
 def pnInterface = parseNodes.Interface
 def pnTypeStatement = parseNodes.TypeStatement
 
 def breakLines = false
 
 var useSemicolons := false
+
+var chosenTypes := universalSet
+// everything is in it
+class universalSet { method contains(other) { true } }
+// things might be in it, or they might not
+method randomSet(seed) {
+    var gen := rand(seed)
+    object { method contains(other) { gen.nextBool } }}
+
+// An implementation of Robert Floyd's Sampling algorithm
+method choose(keep, total, seed) {
+    chosenTypes := newSet
+    var gen := rand(seed)
+    var j := (total - keep) + 1
+    while {j <= total} do {
+        def t = gen.next(j)
+        if (!chosenTypes.contains(t)) then {
+            chosenTypes.add(t)
+        } else {
+            chosenTypes.add(j)
+        }
+        j := j + 1
+    }
+}
+
+var currentType := 0
+var skippedTypes := 0
+var totalTypes := 0
+var missingTypes := 0
+var unknownTypes := 0
+var typemask := "" // Contains a + for every kept type, and a - for every removed type
+method prettyPrintPartiallyTyped(obj, keep, total, seed) {
+    choose(keep, total, seed)
+    def ret = prettyPrintObjectBody(obj, "")
+    if ((total != 0) && (currentType != total)) then {
+        Exception.raise  "ERROR: you lied to me, I found {currentType} type annotations, but you said there were {total}!"
+    }
+    if (skippedTypes != (currentType - keep)) then {
+        Exception.raise "ERROR: I didn't do as I was told, I printed {currentType - skippedTypes} type annotations, instead of {keep}"
+    }
+    ret ++ "\n//TYPEMASK: {typemask}\n// Chose {keep} random type annotations out of {currentType} to keep, using seed {seed}." ++
+        "\n// (Not counting {missingTypes} mising type annotations, and {unknownTypes} Unknown annotations).\n"
+}
+
+method prettyPrintRandomlyTyped(obj, seed) {
+    chosenTypes := randomSet(seed)
+    def ret = prettyPrintObjectBody(obj, "")
+    ret ++ "\n// Randomly chose {currentType - skippedTypes}/{currentType} types, using seed {seed}." ++
+        "\n// (Not counting {missingTypes} missing type annotations, and {unknownTypes} Unknown annotations).\n"
+}
+
+method prettyPrintType(prefix, ty, indent) {
+    currentType := currentType + 1
+    if (ty.isNull) then {
+        missingTypes := missingTypes + 1 // No Type
+        currentType := currentType - 1 // No type in source
+        return ""
+    }
+    var pty := prettyPrint(ty, indent)
+    if (pty == "Unknown") then {
+        unknownTypes := unknownTypes + 1 // User didn't have a type
+        currentType := currentType - 1 // No real type
+        return prefix ++ pty
+    }
+
+    if (chosenTypes.contains(currentType)) then {
+        typemask := typemask ++ "+"
+        return prefix ++ pty
+    } else {
+        typemask := typemask ++ "-"
+        skippedTypes := skippedTypes + 1
+        return prefix ++ "Unknown"
+    }
+}
 
 method prettyPrintObjectBodyWithSemicolons(obj) {
     useSemicolons := true
@@ -79,10 +154,10 @@ method prettyPrint(obj, indent) {
         case { p : pnSignaturePart -> prettyPrintSignaturePart(p, indent) }
         case { s : pnSignature -> prettyPrintSignature(s, indent) }
         case { o : pnObject -> prettyPrintObject(o, indent) }
-        case { r : pnImplicitReceiverRequest ->
-            prettyPrintImplicitReceiverRequest(r, indent) }
         case { r : pnExplicitReceiverRequest ->
             prettyPrintExplicitReceiverRequest(r, indent) }
+        case { r : pnImplicitReceiverRequest ->
+            prettyPrintImplicitReceiverRequest(r, indent) }
         case { o : pnIdentifier -> prettyPrintIdentifier(o, indent) }
         case { r : pnTypedParameter ->
             prettyPrintTypedParameter(r, indent) }
@@ -104,6 +179,8 @@ method prettyPrint(obj, indent) {
         case { b : pnAnnotations -> prettyPrintAnnotations(b, indent) }
         case { r : pnExplicitBracketRequest ->
             prettyPrintExplicitBracketRequest(r, indent) }
+        case { r : pnImplicitBracketRequest ->
+            prettyPrintImplicitBracketRequest(r, indent) }
         case { b : pnInterface -> prettyPrintInterface(b, indent) }
         case { b : pnTypeStatement -> prettyPrintTypeStatement(b, indent) }
         case { _ ->
@@ -273,9 +350,7 @@ method prettyPrintSignature(s, indent) {
     for (0 .. (size - 1)) do { i ->
         ret := ret ++ prettyPrint(parts.at(i), indent)
     }
-    if (!returnType.isNull) then {
-        ret := ret ++ " -> " ++ prettyPrint(returnType, indent)
-    }
+    ret := ret ++ prettyPrintType(" -> ", returnType, indent)
     if (!s.get_Annotations.isNull) then {
         ret := ret ++ prettyPrint(s.get_Annotations, indent)
     }
@@ -372,7 +447,7 @@ method prettyPrintExplicitReceiverRequest(r, indent) {
 }
 
 method prettyPrintTypedParameter(p, indent) {
-    "{prettyPrint(p.get_Name, indent)} : {prettyPrint(p.get_Type, indent)}"
+    prettyPrint(p.get_Name, indent) ++ prettyPrintType(" : ", p.get_Type, indent)
 }
 
 method prettyPrintBlock(b, indent) {
@@ -426,8 +501,7 @@ method prettyPrintBlock(b, indent) {
 }
 
 method prettyPrintVarDeclaration(v, indent) {
-    var ret := "var "
-    ret := ret ++ prettyPrint(v.get_Name, indent)
+    var ret := "var {prettyPrint(v.get_Name, indent)}" ++ prettyPrintType(" : ", v.get_Type, indent)
     if (!v.get_Annotations.isNull) then {
         ret := ret ++ prettyPrint(v.get_Annotations, indent)
     }
@@ -439,8 +513,7 @@ method prettyPrintVarDeclaration(v, indent) {
 }
 
 method prettyPrintDefDeclaration(v, indent) {
-    var ret := "def "
-    ret := ret ++ prettyPrint(v.get_Name, indent)
+    var ret := "def {prettyPrint(v.get_Name, indent)}" ++ prettyPrintType(" : ", v.get_Type, indent)
     if (!v.get_Annotations.isNull) then {
         ret := ret ++ prettyPrint(v.get_Annotations, indent)
     }
@@ -562,6 +635,19 @@ method prettyPrintAnnotations(o, ind) {
 
 method prettyPrintExplicitBracketRequest(b, indent) {
     var ret := "{prettyPrint(b.get_Receiver, indent)}{b.get_Token.get_Name}"
+    def args = b.get_Arguments
+    def argc = args.get_Count
+    for (0 .. (argc - 1)) do { i ->
+        if (i > 0) then {
+            ret := ret ++ ", "
+        }
+        ret := ret ++ prettyPrint(args.at(i), indent)
+    }
+    "{ret}{b.get_Token.get_Other}"
+}
+
+method prettyPrintImplicitBracketRequest(b, indent) {
+    var ret := "{b.get_Token.get_Name}"
     def args = b.get_Arguments
     def argc = args.get_Count
     for (0 .. (argc - 1)) do { i ->

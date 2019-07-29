@@ -4,8 +4,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.IO;
+using System.Numerics;
 using Grace.Runtime;
 using Grace.Execution;
+using Grace.Utility;
 
 namespace Grace.Parsing
 {
@@ -2035,6 +2037,9 @@ namespace Grace.Parsing
             LocalScope surrounding = new LocalScope();
             surrounding.AddLocalDef("parseNodes",
                     new DictionaryDataObject(GetPatternDict()));
+            surrounding.AddMethod("rand(_)", new DelegateMethod1(seed => new GraceRandom(seed)));
+            surrounding.AddMethod("newSet", new DelegateMethod0(() => new GraceNumberSet()));
+
             ctx.Extend(surrounding);
             using (StreamReader reader = File.OpenText(path))
             {
@@ -2086,32 +2091,170 @@ namespace Grace.Parsing
         /// <param name="useSemicolons">
         /// True to insert semicolons after every statement.
         /// </param>
-        public static string PrettyPrintModule(
-                EvaluationContext ctx,
-                ObjectParseNode p,
-                bool useSemicolons
-                )
+        public static string PrettyPrintModule(EvaluationContext ctx, ObjectParseNode p, bool useSemicolons)
+        {
+            return PrettyPrintWithRequest(ctx, useSemicolons ?
+                MethodRequest.Single("prettyPrintObjectBodyWithSemicolons",new GraceObjectProxy(p.Body)) :
+                MethodRequest.WithArgs("prettyPrintObjectBody", new GraceObject[] { new GraceObjectProxy(p.Body), GraceString.Create("") }));
+        }
+
+        static string PrettyPrintWithRequest(EvaluationContext ctx, MethodRequest request)
         {
             if (prettyPrinter == null)
                 prettyPrinter = getPrettyPrinter(ctx);
-            MethodRequest req;
-            if (useSemicolons)
-            {
-                req = MethodRequest.Single(
-                        "prettyPrintObjectBodyWithSemicolons",
-                    new GraceObjectProxy(p.Body));
-            }
-            else
-            {
-                req = MethodRequest.WithArgs("prettyPrintObjectBody",
-                        new GraceObject[] { new GraceObjectProxy(p.Body),
-                            GraceString.Create("") });
-            }
-            var r = prettyPrinter.Request(ctx, req);
+            var r = prettyPrinter.Request(ctx, request);
             var gs = r as GraceString;
             if (gs == null)
                 return "";
             return gs.Value.Replace("\u2028", Environment.NewLine);
         }
+
+
+        /// <summary></summary>
+        /// <param name="ctx"></param>
+        /// <param name="p"></param>
+        /// <param name="keep"></param>
+        /// <param name="total"></param>
+        /// <param name="seed"></param>
+        public static string PrettyPrintPartiallyTyped(EvaluationContext ctx, ObjectParseNode p, int keep, int total, int seed)
+        {
+            return PrettyPrintWithRequest(ctx, MethodRequest.WithArgs("prettyPrintPartiallyTyped",
+                new GraceObject[] { new GraceObjectProxy(p.Body), GraceNumber.Create(keep), GraceNumber.Create(total), GraceNumber.Create(seed)}));
+        }
+
+        /// <summary></summary>
+        /// <param name="ctx"></param>
+        /// <param name="p"></param>
+        /// <param name="seed"></param>
+        public static string PrettyPrintRandomlyTyped(EvaluationContext ctx, ObjectParseNode p, int seed)
+        {
+            return PrettyPrintWithRequest(ctx, MethodRequest.WithArgs("prettyPrintRandomlyTyped",
+                new GraceObject[] { new GraceObjectProxy(p.Body), GraceNumber.Create(seed)}));
+        }
+    }
+}
+
+// TODO: Put this in a more appropriate place, and make it more generally usable
+// (or just implement a random number generator entirely in Grace...)
+class GraceRandom : GraceObject {
+    public GraceRandom(GraceObject seed) : base(createSharedMethods()) {
+        GraceNumber o = GraceNumberSet.AsNumber(seed);
+        Int32 s = 0;
+        if (o != null) s = o.GetInt();
+        else {
+            Grace.ErrorReporting.RaiseError(null, "R2001",
+                new Dictionary<string, string>() {
+                    { "method", "rand" },
+                    { "index", "0" },
+                    { "part", "rand" },
+                    { "required", "Number" }
+                },
+                "ArgumentTypeError: rand requires a Number argument"
+            );
+        }
+        this.generator = new Random(s);
+    }
+    Random generator;
+
+    /// <summary>Generates a random number between 1 and other</summary>
+    /// <param name="other">Argument to the method</param>
+    public static GraceObject mNext(GraceRandom rand, GraceObject other)
+    {
+        GraceNumber o = GraceNumberSet.AsNumber(other);
+        if (o != null)
+            return GraceNumber.Create(rand.generator.Next(1, o.GetInt()));
+
+        Grace.ErrorReporting.RaiseError(null, "R2001",
+                new Dictionary<string, string>() {
+                    { "method", "next" },
+                    { "index", "1" },
+                    { "part", "next" },
+                    { "required", "Number" }
+                },
+                "ArgumentTypeError: next requires a Number argument"
+        );
+        return GraceNumber.Create(0);
+    }
+
+    // <summary>Generates a random boolean</summary>
+    public static GraceObject mNextBool(GraceRandom rand) { return GraceBoolean.Create(rand.generator.NextDouble() >= 0.5); }
+
+    private static Dictionary<string, Method> sharedMethods;
+    private static Dictionary<string, Method> createSharedMethods()
+    {
+        if (sharedMethods != null)
+            return sharedMethods;
+
+        sharedMethods = new Dictionary<string, Method>
+        {
+            { "next(_)", new DelegateMethodTyped1<GraceRandom>(mNext) },
+            { "nextBool", new DelegateMethodTyped0<GraceRandom>(mNextBool) }
+        };
+        return sharedMethods;
+    }
+}
+
+/// <summary>A set of Grace Numbers</summary>
+class GraceNumberSet : GraceObject {
+    public GraceNumberSet() : base(createSharedMethods()) {}
+    HashSet<Rational> set = new HashSet<Rational>();
+
+    public override String ToString() {
+        return "{" + String.Join(", ", this.set.Select(r => r.ToString()).ToArray()) + "}"; }
+    /// <param name="other">Argument to the method</param>
+    public static GraceObject mContains(GraceNumberSet set, GraceObject other)
+    {
+        GraceNumber o = AsNumber(other);
+        if (o != null)
+            return GraceBoolean.Create(set.set.Contains(o.Value));
+
+        Grace.ErrorReporting.RaiseError(null, "R2001",
+                new Dictionary<string, string>() {
+                    { "method", "contains" },
+                    { "index", "1" },
+                    { "part", "contains" },
+                    { "required", "Number" }
+                },
+                "ArgumentTypeError: contains requires a Number argument"
+        );
+        return GraceBoolean.Create(false);
+    }
+
+    public static GraceNumber AsNumber(GraceObject other) {
+        var num = other as GraceNumber;
+        var prox = other as GraceObjectProxy;
+
+        return num != null ? num : prox != null ? prox.Object as GraceNumber : null;
+    }
+
+    /// <param name="other">Argument to the method</param>
+    public static GraceObject mAdd(GraceNumberSet set, GraceObject other)
+    {
+        GraceNumber o = AsNumber(other);
+        if (o != null) set.set.Add(o.Value);
+        else Grace.ErrorReporting.RaiseError(null, "R2001",
+                new Dictionary<string, string>() {
+                    { "method", "add" },
+                    { "index", "1" },
+                    { "part", "add" },
+                    { "required", "Number" }
+                },
+                "ArgumentTypeError: add requires a Number argument"
+        );
+        return GraceObject.Done;
+    }
+
+    private static Dictionary<string, Method> sharedMethods;
+    private static Dictionary<string, Method> createSharedMethods()
+    {
+        if (sharedMethods != null)
+            return sharedMethods;
+
+        sharedMethods = new Dictionary<string, Method>
+        {
+            { "add(_)", new DelegateMethodTyped1<GraceNumberSet>(mAdd) },
+            { "contains(_)", new DelegateMethodTyped1<GraceNumberSet>(mContains) },
+        };
+        return sharedMethods;
     }
 }
