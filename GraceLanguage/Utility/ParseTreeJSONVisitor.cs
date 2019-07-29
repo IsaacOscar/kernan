@@ -381,7 +381,7 @@ namespace Grace.Utility
             var el = makeNode(spn, "signature");
             addProperty(el, "name", spn.Name);
             addProperty(el, "returntype", spn.ReturnType);
-            addProperty(el, "annotations", spn.Annotations);
+	    //addProperty(el, "annotations", spn.Annotations);
             addProperty(el, "parts", spn.Parts);
             return el;
         }
