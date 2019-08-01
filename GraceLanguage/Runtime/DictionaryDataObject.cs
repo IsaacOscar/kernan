@@ -3,9 +3,10 @@ using System.Runtime.CompilerServices;
 using Grace.Execution;
 using Grace.Parsing;
 
+#pragma warning disable CS1591 // Disable warnings about missing XML comments
 namespace Grace.Runtime
 {
-    class DictionaryDataObject : GraceObject,
+    public class DictionaryDataObject : GraceObject,
         IEnumerable<KeyValuePair<string, GraceObject>>
     {
         private Dictionary<string, GraceObject> data;
